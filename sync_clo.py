@@ -1,5 +1,3 @@
-[file name]: sync_clo.py
-[file content begin]
 import xml.etree.ElementTree as ET
 import os
 import subprocess
@@ -284,4 +282,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-[file content end]
