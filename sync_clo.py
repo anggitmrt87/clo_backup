@@ -11,8 +11,8 @@ CLO_BASE_URL = "https://git.codelinaro.org/clo/la/"
 REPO_PREFIX = "clo-backup-" 
 
 # Pastikan token ada
-GITHUB_TOKEN = os.environ.get('GH_TOKEN')
-if not GITHUB_TOKEN:
+GH_PERSONAL_TOKEN = os.environ.get('GH_PERSONAL_TOKEN')
+if not GH_PERSONAL_TOKEN:
     print("Error: Secret GH_PERSONAL_TOKEN belum diset di GitHub Actions!")
     sys.exit(1)
 
@@ -90,7 +90,7 @@ def main():
         run_cmd("git remote remove origin", cwd=local_path)
         
         # Tambah remote baru dengan Auth Token embedded di URL
-        remote_url = f"https://{GH_USERNAME}:{GITHUB_TOKEN}@github.com/{GH_USERNAME}/{new_repo_name}.git"
+        remote_url = f"https://{GH_USERNAME}:{GH_PERSONAL_TOKEN}@github.com/{GH_USERNAME}/{new_repo_name}.git"
         run_cmd(f"git remote add origin {remote_url}", cwd=local_path)
         
         # Push force

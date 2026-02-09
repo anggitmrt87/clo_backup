@@ -24,7 +24,7 @@ jobs:
     - name: Run Sync Script
       env:
         # Mapping Secret yang Anda buat tadi ke env var
-        GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }} 
+        GH_PERSONAL_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }} 
       run: |
         # Login ke gh cli menggunakan token
         echo "${{ secrets.GH_PERSONAL_TOKEN }}" | gh auth login --with-token
