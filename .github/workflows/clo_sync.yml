@@ -1,0 +1,33 @@
+name: CLO to GitHub Sync
+
+on:
+  workflow_dispatch: # Agar bisa dijalankan manual lewat tombol
+
+jobs:
+  sync-repos:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository (Script & XML)
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Configure Git Global
+      run: |
+        git config --global user.name "GitHub Action Bot"
+        git config --global user.email "action@github.com"
+
+    - name: Run Sync Script
+      env:
+        # Mapping Secret yang Anda buat tadi ke env var
+        GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }} 
+      run: |
+        # Login ke gh cli menggunakan token
+        echo "${{ secrets.GH_PERSONAL_TOKEN }}" | gh auth login --with-token
+        
+        # Jalankan script
+        python sync_clo.py
