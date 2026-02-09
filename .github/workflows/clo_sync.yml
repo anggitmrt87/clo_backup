@@ -1,52 +1,78 @@
 name: CLO to GitHub Sync
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Agar bisa dijalankan manual lewat tombol
 
 jobs:
   sync-repos:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 120  # 2 jam timeout
     
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    - name: Install Dependencies
+    - name: Install Git and dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git-lfs
+        sudo apt-get install -y \
+          git \
+          git-lfs \
+          curl \
+          wget \
+          ca-certificates
 
-    - name: Install GitHub CLI
+    - name: Install GitHub CLI (Method 1 - Download Binary)
       run: |
-        type -p gh > /dev/null || curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-        sudo apt update
-        sudo apt install -y gh
+        # Cek apakah gh sudah terinstall
+        if ! command -v gh &> /dev/null; then
+          echo "Installing GitHub CLI..."
+          # Download binary langsung
+          curl -fsSL https://github.com/cli/cli/releases/download/v2.47.0/gh_2.47.0_linux_amd64.tar.gz -o gh.tar.gz
+          tar -xf gh.tar.gz
+          sudo cp gh_2.47.0_linux_amd64/bin/gh /usr/local/bin/
+          rm -rf gh.tar.gz gh_2.47.0_linux_amd64
+          echo "GitHub CLI installed via binary"
+        else
+          echo "GitHub CLI already installed"
+        fi
+        
+        # Verifikasi instalasi
+        gh --version
 
     - name: Configure Git
       run: |
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
-        git config --global http.postBuffer 524288000
+        git config --global http.postBuffer 524288000  # Untuk repositori besar
         git config --global core.compression 9
+        git config --global init.defaultBranch main
 
     - name: Login to GitHub CLI
       env:
         GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
       run: |
-        echo "$GH_TOKEN" | gh auth login --with-token
+        echo "$GH_TOKEN" | gh auth login --with-token --hostname github.com
+        
+        # Verifikasi login
+        gh auth status
 
     - name: Run Sync Script
       env:
         GH_PERSONAL_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
       run: |
+        # Install python dependencies jika ada
+        pip install --upgrade pip
+        
+        # Set timeout untuk mencegah stuck
         timeout 110m python sync_clo.py
+        
+        # Cek exit code
         if [ $? -eq 124 ]; then
           echo "Error: Process timed out after 110 minutes"
           exit 1
@@ -56,5 +82,5 @@ jobs:
       if: failure()
       run: |
         echo "Workflow failed. Cleaning up..."
-        rm -rf temp_work
-        rm -rf temp_work_work
+        rm -rf temp_work*
+        echo "Cleanup completed"
