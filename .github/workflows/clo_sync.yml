@@ -1,33 +1,60 @@
 name: CLO to GitHub Sync
 
 on:
-  workflow_dispatch: # Agar bisa dijalankan manual lewat tombol
+  workflow_dispatch:
 
 jobs:
   sync-repos:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     
     steps:
-    - name: Checkout Repository (Script & XML)
+    - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Set up Python
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
 
-    - name: Configure Git Global
+    - name: Install Dependencies
       run: |
-        git config --global user.name "GitHub Action Bot"
-        git config --global user.email "action@github.com"
+        sudo apt-get update
+        sudo apt-get install -y git-lfs
+
+    - name: Install GitHub CLI
+      run: |
+        type -p gh > /dev/null || curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        sudo apt update
+        sudo apt install -y gh
+
+    - name: Configure Git
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git config --global http.postBuffer 524288000
+        git config --global core.compression 9
+
+    - name: Login to GitHub CLI
+      env:
+        GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
+      run: |
+        echo "$GH_TOKEN" | gh auth login --with-token
 
     - name: Run Sync Script
       env:
-        # Mapping Secret yang Anda buat tadi ke env var
-        GH_PERSONAL_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }} 
+        GH_PERSONAL_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
       run: |
-        # Login ke gh cli menggunakan token
-        echo "${{ secrets.GH_PERSONAL_TOKEN }}" | gh auth login --with-token
-        
-        # Jalankan script
-        python sync_clo.py
+        timeout 110m python sync_clo.py
+        if [ $? -eq 124 ]; then
+          echo "Error: Process timed out after 110 minutes"
+          exit 1
+        fi
+
+    - name: Cleanup on Failure
+      if: failure()
+      run: |
+        echo "Workflow failed. Cleaning up..."
+        rm -rf temp_work
+        rm -rf temp_work_work
