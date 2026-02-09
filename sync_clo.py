@@ -1,3 +1,5 @@
+[file name]: sync_clo.py
+[file content begin]
 import xml.etree.ElementTree as ET
 import os
 import subprocess
@@ -53,7 +55,7 @@ def cleanup_path(path):
             shutil.rmtree(path)
             print(f"[INFO] Cleared {path}")
         except Exception as e:
-            print(f"[-] Gagal menghapus {path}: {e}")
+            print(f"[-] Gagal menghapus {replath}: {e}")
 
 def get_repo_tags(repo_path):
     """Dapatkan semua tag dari repository"""
@@ -62,15 +64,44 @@ def get_repo_tags(repo_path):
         return result.stdout.strip().split('\n')
     return []
 
+def is_sha1_hash(text):
+    """Cek apakah string adalah SHA-1 hash (40 karakter heksadesimal)"""
+    return bool(re.match(r'^[0-9a-f]{40}$', text, re.IGNORECASE))
+
 def sanitize_branch_name(name):
     """Sanitize branch name untuk menghindari karakter yang tidak valid"""
+    # Jika nama adalah SHA-1 hash, ubah ke format yang aman
+    if is_sha1_hash(name):
+        return f"commit_{name[:8]}"
+    
     # Hapus karakter berbahaya
     sanitized = re.sub(r'[^\w\-/.]', '_', name)
     # Hapus awalan/takhiran underscore
     sanitized = sanitized.strip('_')
     # Ganti multiple underscores dengan satu
     sanitized = re.sub(r'_+', '_', sanitized)
+    
+    # Pastikan tidak terlalu panjang
+    if len(sanitized) > 255:
+        sanitized = sanitized[:200] + "_truncated"
+    
     return sanitized
+
+def get_branch_name_from_revision(revision, working_path):
+    """Tentukan nama branch yang aman berdasarkan revision"""
+    # Cek apakah revision adalah tag
+    tags = get_repo_tags(working_path)
+    is_tag = revision in tags
+    
+    if is_tag:
+        # Jika revision adalah tag, buat branch dengan nama tag yang disanitasi
+        return sanitize_branch_name(f"tag_{revision}")
+    elif is_sha1_hash(revision):
+        # Jika revision adalah commit hash, buat branch dengan format commit_{short_hash}
+        return sanitize_branch_name(revision)
+    else:
+        # Jika revision adalah nama branch biasa
+        return sanitize_branch_name(revision)
 
 def process_project(name, revision, i, total, temp_dir):
     """Proses satu project"""
@@ -121,37 +152,48 @@ def process_project(name, revision, i, total, temp_dir):
         cleanup_path(local_path)
         return False
 
-    # 4. CHECKOUT REVISI
+    # 4. TENTUKAN BRANCH NAME YANG AMAN
+    branch_name = get_branch_name_from_revision(revision, working_path)
+    
+    # 5. CHECKOUT REVISI
     print(f"    -> Checkout revision: {revision}")
     
-    # Cek apakah revision adalah tag
-    tags = get_repo_tags(working_path)
-    is_tag = revision in tags
-    
-    # Checkout ke revision
+    # Coba checkout ke revision
     if not run_cmd(f"git checkout {revision}", cwd=working_path):
         print(f"[-] Gagal checkout {revision}")
-        cleanup_path(working_path)
-        cleanup_path(local_path)
-        return False
+        
+        # Coba cari alternatif: cek apakah ada remote branch
+        print(f"    -> Mencoba alternatif: cek remote branch...")
+        result = run_cmd("git branch -r", cwd=working_path, capture_output=True, allow_failure=True)
+        if result and result.returncode == 0:
+            remote_branches = [b.strip() for b in result.stdout.split('\n') if b.strip()]
+            print(f"    -> Remote branches: {remote_branches}")
+        
+        # Coba checkout ke default branch
+        print(f"    -> Mencoba checkout ke default branch...")
+        if not run_cmd("git checkout main", cwd=working_path):
+            if not run_cmd("git checkout master", cwd=working_path):
+                print(f"[-] Gagal checkout ke branch default")
+                cleanup_path(working_path)
+                cleanup_path(local_path)
+                return False
+            else:
+                revision = "master"
+        else:
+            revision = "main"
+    
+    # 6. BUAT BRANCH BARU DENGAN NAMA YANG AMAN
+    print(f"    -> Membuat branch: {branch_name}")
+    if not run_cmd(f"git checkout -b {branch_name}", cwd=working_path, allow_failure=True):
+        # Jika gagal membuat branch baru, tetap di branch yang ada
+        print(f"    -> Gagal membuat branch {branch_name}, tetap di branch {revision}")
+        current_branch_result = run_cmd("git branch --show-current", cwd=working_path, capture_output=True)
+        if current_branch_result and current_branch_result.returncode == 0:
+            branch_name = current_branch_result.stdout.strip()
+        else:
+            branch_name = revision
 
-    # 5. BUAT BRANCH SESUAI TAG/REVISION
-    if is_tag:
-        # Jika revision adalah tag, buat branch dengan nama tag
-        branch_name = sanitize_branch_name(f"tag_{revision}")
-        print(f"    -> Revision adalah tag, membuat branch: {branch_name}")
-        if not run_cmd(f"git checkout -b {branch_name}", cwd=working_path):
-            print(f"    -> Gagal membuat branch {branch_name}, menggunakan main")
-            branch_name = "main"
-            run_cmd("git checkout -b main", cwd=working_path)
-    else:
-        # Jika revision adalah branch, gunakan nama branch tersebut
-        branch_name = sanitize_branch_name(revision)
-        print(f"    -> Revision adalah branch, menggunakan: {branch_name}")
-        # Coba checkout ke branch tersebut
-        run_cmd(f"git checkout -b {branch_name}", cwd=working_path, allow_failure=True)
-
-    # 6. PUSH KE GITHUB DENGAN SEMUA TAG
+    # 7. PUSH KE GITHUB DENGAN SEMUA TAG
     print(f"    -> Pushing ke GitHub...")
     
     # Hapus remote origin lama (CLO)
@@ -180,14 +222,21 @@ def process_project(name, revision, i, total, temp_dir):
     if not run_cmd("git push origin --tags --force", cwd=working_path):
         print(f"[-] Gagal push tags")
     
-    # 7. JIKA ADA TAG REVISION, BUAT RELEASE DI GITHUB
-    if is_tag:
+    # 8. JIKA REVISION ADALAH TAG, BUAT RELEASE DI GITHUB
+    tags = get_repo_tags(working_path)
+    if revision in tags:
         print(f"    -> Membuat GitHub Release untuk tag {revision}...")
-        # Buat release di GitHub
-        release_cmd = f"gh release create {revision} --title '{revision}' --notes 'Automated sync from CLO' --repo {new_repo_name}"
-        run_cmd(release_cmd, allow_failure=True)
+        # Cek apakah release sudah ada
+        check_release = run_cmd(f"gh release view {revision} --repo {new_repo_name}", 
+                              capture_output=True, allow_failure=True)
+        if check_release and check_release.returncode != 0:
+            # Buat release baru jika belum ada
+            release_cmd = f"gh release create {revision} --title '{revision}' --notes 'Automated sync from CLO' --repo {new_repo_name}"
+            run_cmd(release_cmd, allow_failure=True)
+        else:
+            print(f"    -> Release untuk tag {revision} sudah ada")
     
-    # 8. CLEANUP
+    # 9. CLEANUP
     print(f"    -> Membersihkan folder lokal...")
     cleanup_path(working_path)
     cleanup_path(local_path)
@@ -235,3 +284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+[file content end]
