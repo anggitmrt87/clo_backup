@@ -55,9 +55,9 @@ jobs:
 
     - name: Login to GitHub CLI
       env:
-        GH_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
+        GH_PERSONAL_TOKEN: ${{ secrets.GH_PERSONAL_TOKEN }}
       run: |
-        echo "$GH_TOKEN" | gh auth login --with-token --hostname github.com
+        echo "$GH_PERSONAL_TOKEN" | gh auth login --with-token --hostname github.com
         
         # Verifikasi login
         gh auth status
